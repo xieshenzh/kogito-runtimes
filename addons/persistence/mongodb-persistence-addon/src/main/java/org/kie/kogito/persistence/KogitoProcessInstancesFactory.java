@@ -17,13 +17,13 @@ package org.kie.kogito.persistence;
 
 import com.mongodb.client.MongoClient;
 import org.kie.kogito.mongodb.MongoDBProcessInstances;
+import org.kie.kogito.mongodb.transaction.MongoDBTransactionManager;
 import org.kie.kogito.process.Process;
 import org.kie.kogito.process.ProcessInstancesFactory;
 
 /**
  * This class must always have exact FQCN as
  * <code>org.kie.kogito.persistence.KogitoProcessInstancesFactory</code>
- *
  */
 public abstract class KogitoProcessInstancesFactory implements ProcessInstancesFactory {
 
@@ -35,8 +35,10 @@ public abstract class KogitoProcessInstancesFactory implements ProcessInstancesF
 
     public abstract String dbName();
 
+    public abstract MongoDBTransactionManager transactionManager();
+
     @Override
     public MongoDBProcessInstances<?> createProcessInstances(Process<?> process) {
-        return new MongoDBProcessInstances<>(mongoClient, process, dbName());
+        return new MongoDBProcessInstances<>(mongoClient, process, dbName(), transactionManager());
     }
 }

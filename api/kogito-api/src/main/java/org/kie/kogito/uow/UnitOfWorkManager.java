@@ -16,6 +16,7 @@
 package org.kie.kogito.uow;
 
 import org.kie.kogito.event.EventManager;
+import org.kie.kogito.uow.events.UnitOfWorkEventManager;
 
 /**
  * Manager that controls and give access to UnitOfWork.
@@ -46,4 +47,10 @@ public interface UnitOfWorkManager {
      * @return event manager instance
      */
     EventManager eventManager();
+
+    /**
+     * Returns instance of the event manager handling unit of work state changes
+     * @return transaction manager instance
+     */
+    UnitOfWorkEventManager unitOfWorkEventManager();
 }

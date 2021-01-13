@@ -13,13 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.kie.kogito.mongodb;
+
+package org.kie.kogito.persistence;
 
 import org.junit.jupiter.api.Test;
-import org.kie.kogito.persistence.KogitoProcessInstancesFactory;
+import org.kie.kogito.mongodb.MongoDBProcessInstances;
+import org.kie.kogito.mongodb.TestHelper;
+import org.kie.kogito.mongodb.transaction.MongoDBTransactionManager;
 import org.kie.kogito.process.Process;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -28,11 +32,18 @@ class KogitoProcessInstancesFactoryTest extends TestHelper {
 
     @Test
     void test() {
+        MongoDBTransactionManager transactionManager = mock(MongoDBTransactionManager.class);
+
         KogitoProcessInstancesFactory factory = new KogitoProcessInstancesFactory(getMongoClient()) {
 
             @Override
             public String dbName() {
                 return DB_NAME;
+            }
+
+            @Override
+            public MongoDBTransactionManager transactionManager() {
+                return transactionManager;
             }
         };
         assertNotNull(factory);
@@ -42,5 +53,6 @@ class KogitoProcessInstancesFactoryTest extends TestHelper {
         lenient().when(process.name()).thenReturn(PROCESS_NAME);
         MongoDBProcessInstances<?> instance = factory.createProcessInstances(process);
         assertNotNull(instance);
+        assertEquals(transactionManager, factory.transactionManager());
     }
 }

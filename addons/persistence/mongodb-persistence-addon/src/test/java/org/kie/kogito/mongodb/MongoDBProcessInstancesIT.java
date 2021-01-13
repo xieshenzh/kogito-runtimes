@@ -24,6 +24,8 @@ import java.util.Map;
 
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import org.bson.Document;
 import org.drools.core.io.impl.ClassPathResource;
 import org.jbpm.process.instance.impl.Action;
 import org.jbpm.workflow.core.DroolsAction;
@@ -34,6 +36,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.kie.api.definition.process.Node;
 import org.kie.kogito.auth.SecurityPolicy;
+import org.kie.kogito.mongodb.transaction.MongoDBTransactionManager;
 import org.kie.kogito.persistence.KogitoProcessInstancesFactory;
 import org.kie.kogito.process.ProcessInstance;
 import org.kie.kogito.process.ProcessInstanceReadMode;
@@ -43,6 +46,8 @@ import org.kie.kogito.process.bpmn2.BpmnProcess;
 import org.kie.kogito.process.bpmn2.BpmnVariables;
 import org.kie.kogito.services.identity.StaticIdentityProvider;
 import org.kie.kogito.testcontainers.KogitoMongoDBContainer;
+import org.kie.kogito.uow.events.AfterEndEvent;
+import org.kie.kogito.uow.events.BeforeStartEvent;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -53,6 +58,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.kie.api.runtime.process.ProcessInstance.STATE_ACTIVE;
 import static org.kie.api.runtime.process.ProcessInstance.STATE_COMPLETED;
 import static org.kie.kogito.internal.process.runtime.KogitoProcessInstance.STATE_ERROR;
+import static org.kie.kogito.mongodb.utils.DocumentConstants.DOCUMENT_ID;
 
 @Testcontainers
 class MongoDBProcessInstancesIT {
@@ -62,12 +68,18 @@ class MongoDBProcessInstancesIT {
     @Container
     final static KogitoMongoDBContainer mongoDBContainer = new KogitoMongoDBContainer();
     final static String DB_NAME = "testdb";
+    final static String COLLECTION_NAME = "UserTask";
+    final static String TEST_ID = "test";
     private static MongoClient mongoClient;
 
     @BeforeAll
     public static void startContainerAndPublicPortIsAvailable() {
         mongoDBContainer.start();
         mongoClient = MongoClients.create(mongoDBContainer.getReplicaSetUrl());
+        // Create the collection
+        MongoCollection<Document> collection = mongoClient.getDatabase(DB_NAME).getCollection(COLLECTION_NAME);
+        collection.insertOne(new Document().append(DOCUMENT_ID, TEST_ID));
+        collection.deleteOne(new Document().append(DOCUMENT_ID, TEST_ID));
     }
 
     @AfterAll
@@ -77,8 +89,33 @@ class MongoDBProcessInstancesIT {
 
     @Test
     void test() {
+        MongoDBTransactionManager transactionManager = new MongoDBTransactionManager(mongoClient) {
+            @Override
+            public boolean enabled() {
+                return false;
+            }
+        };
+
+        test(transactionManager);
+    }
+
+    @Test
+    void test_withTransaction() {
+        MongoDBTransactionManager transactionManager = new MongoDBTransactionManager(mongoClient) {
+            @Override
+            public boolean enabled() {
+                return true;
+            }
+        };
+
+        transactionManager.onBeforeStartEvent(new BeforeStartEvent());
+        test(transactionManager);
+        transactionManager.onAfterEndEvent(new AfterEndEvent());
+    }
+
+    private void test(MongoDBTransactionManager transactionManager) {
         BpmnProcess process = BpmnProcess.from(new ClassPathResource("BPMN2-UserTask.bpmn2")).get(0);
-        process.setProcessInstancesFactory(new MongoDBProcessInstancesFactory(mongoClient));
+        process.setProcessInstancesFactory(new MongoDBProcessInstancesFactory(mongoClient, transactionManager));
         process.configure();
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("test", "test");
@@ -135,6 +172,31 @@ class MongoDBProcessInstancesIT {
 
     @Test
     void testFindByIdReadMode() {
+        MongoDBTransactionManager transactionManager = new MongoDBTransactionManager(mongoClient) {
+            @Override
+            public boolean enabled() {
+                return false;
+            }
+        };
+
+        testFindByIdReadMode(transactionManager);
+    }
+
+    @Test
+    void testFindByIdReadMode_withTransaction() {
+        MongoDBTransactionManager transactionManager = new MongoDBTransactionManager(mongoClient) {
+            @Override
+            public boolean enabled() {
+                return true;
+            }
+        };
+
+        transactionManager.onBeforeStartEvent(new BeforeStartEvent());
+        testFindByIdReadMode(transactionManager);
+        transactionManager.onAfterEndEvent(new AfterEndEvent());
+    }
+
+    void testFindByIdReadMode(MongoDBTransactionManager transactionManager) {
         BpmnProcess process = BpmnProcess.from(new ClassPathResource("BPMN2-UserTask-Script.bpmn2")).get(0);
         // workaround as BpmnProcess does not compile the scripts but just reads the xml
         for (Node node : ((WorkflowProcess) process.process()).getNodes()) {
@@ -146,7 +208,7 @@ class MongoDBProcessInstancesIT {
                 });
             }
         }
-        process.setProcessInstancesFactory(new MongoDBProcessInstancesFactory(mongoClient));
+        process.setProcessInstancesFactory(new MongoDBProcessInstancesFactory(mongoClient, transactionManager));
         process.configure();
 
         ProcessInstance<BpmnVariables> mutablePi = process.createInstance(BpmnVariables.create(Collections.singletonMap("var", "value")));
@@ -179,8 +241,33 @@ class MongoDBProcessInstancesIT {
 
     @Test
     void testValuesReadMode() {
+        MongoDBTransactionManager transactionManager = new MongoDBTransactionManager(mongoClient) {
+            @Override
+            public boolean enabled() {
+                return false;
+            }
+        };
+
+        testFindByIdReadMode(transactionManager);
+    }
+
+    @Test
+    void testValuesReadMode_withTransaction() {
+        MongoDBTransactionManager transactionManager = new MongoDBTransactionManager(mongoClient) {
+            @Override
+            public boolean enabled() {
+                return true;
+            }
+        };
+
+        transactionManager.onBeforeStartEvent(new BeforeStartEvent());
+        testValuesReadMode(transactionManager);
+        transactionManager.onAfterEndEvent(new AfterEndEvent());
+    }
+
+    void testValuesReadMode(MongoDBTransactionManager transactionManager) {
         BpmnProcess process = BpmnProcess.from(new ClassPathResource("BPMN2-UserTask.bpmn2")).get(0);
-        process.setProcessInstancesFactory(new MongoDBProcessInstancesFactory(mongoClient));
+        process.setProcessInstancesFactory(new MongoDBProcessInstancesFactory(mongoClient, transactionManager));
         process.configure();
 
         ProcessInstance<BpmnVariables> processInstance = process.createInstance(BpmnVariables.create(Collections.singletonMap("test", "test")));
@@ -197,13 +284,21 @@ class MongoDBProcessInstancesIT {
 
     private class MongoDBProcessInstancesFactory extends KogitoProcessInstancesFactory {
 
-        public MongoDBProcessInstancesFactory(MongoClient mongoClient) {
+        private MongoDBTransactionManager transactionManager;
+
+        public MongoDBProcessInstancesFactory(MongoClient mongoClient, MongoDBTransactionManager transactionManager) {
             super(mongoClient);
+            this.transactionManager = transactionManager;
         }
 
         @Override
         public String dbName() {
             return DB_NAME;
+        }
+
+        @Override
+        public MongoDBTransactionManager transactionManager() {
+            return transactionManager;
         }
     }
 }

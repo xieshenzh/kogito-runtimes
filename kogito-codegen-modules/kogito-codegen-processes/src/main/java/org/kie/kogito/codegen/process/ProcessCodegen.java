@@ -46,6 +46,8 @@ import org.jbpm.serverless.workflow.parser.ServerlessWorkflowParser;
 import org.kie.api.definition.process.Process;
 import org.kie.api.definition.process.WorkflowProcess;
 import org.kie.api.io.Resource;
+import org.kie.kogito.codegen.api.context.impl.QuarkusKogitoBuildContext;
+import org.kie.kogito.codegen.api.context.impl.SpringBootKogitoBuildContext;
 import org.kie.kogito.codegen.core.AbstractGenerator;
 import org.kie.kogito.codegen.api.ApplicationSection;
 import org.kie.kogito.codegen.api.GeneratedFile;
@@ -55,6 +57,8 @@ import org.kie.kogito.codegen.api.io.CollectedResource;
 import org.kie.kogito.codegen.process.config.ProcessConfigGenerator;
 import org.kie.kogito.codegen.process.events.CloudEventsResourceGenerator;
 import org.kie.kogito.codegen.process.events.TopicsInformationResourceGenerator;
+import org.kie.kogito.codegen.process.uow.events.observer.UnitOfWorkEventObserverGenerator;
+import org.kie.kogito.codegen.process.uow.events.publisher.UnitOfWorkEventPublisherGenerator;
 import org.kie.kogito.internal.process.runtime.KogitoWorkflowProcess;
 import org.kie.kogito.rules.units.UndefinedGeneratedRuleUnitVariable;
 import org.slf4j.Logger;
@@ -397,6 +401,20 @@ public class ProcessCodegen extends AbstractGenerator {
                 new TopicsInformationResourceGenerator(context(), processExecutableModelGenerators);
         storeFile(REST_TYPE, topicsGenerator.generatedFilePath(), topicsGenerator.generate());
 
+        if (QuarkusKogitoBuildContext.CONTEXT_NAME.equals(context().name()) ||
+                SpringBootKogitoBuildContext.CONTEXT_NAME.equals(context().name())) {
+            UnitOfWorkEventPublisherGenerator uowEventPublisherGenerator =
+                    new UnitOfWorkEventPublisherGenerator(context());
+            storeFile(GeneratedFileType.SOURCE,
+                    uowEventPublisherGenerator.generatedFilePath(),
+                    uowEventPublisherGenerator.generate());
+
+            UnitOfWorkEventObserverGenerator uowEventObserverGenerator =
+                    new UnitOfWorkEventObserverGenerator(context());
+            storeFile(GeneratedFileType.SOURCE,
+                    uowEventObserverGenerator.generatedFilePath(),
+                    uowEventObserverGenerator.generate());
+        }
 
         for (ProcessInstanceGenerator pi : pis) {
             storeFile(PROCESS_INSTANCE_TYPE, pi.generatedFilePath(), pi.generate());

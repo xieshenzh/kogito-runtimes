@@ -18,6 +18,9 @@ package org.kie.kogito.services.uow;
 import java.util.function.Supplier;
 
 import org.kie.kogito.process.ProcessInstanceExecutionException;
+import org.kie.kogito.uow.events.AfterAbortEvent;
+import org.kie.kogito.uow.events.AfterEndEvent;
+import org.kie.kogito.uow.events.BeforeStartEvent;
 import org.kie.kogito.uow.UnitOfWork;
 import org.kie.kogito.uow.UnitOfWorkManager;
 
@@ -26,26 +29,31 @@ public class UnitOfWorkExecutor {
     public static <T> T executeInUnitOfWork(UnitOfWorkManager uowManager, Supplier<T> supplier) {
         T result = null;
         UnitOfWork uow = uowManager.newUnitOfWork();
-        
+
         try {
+            uowManager.unitOfWorkEventManager().sendEvent(new BeforeStartEvent());
             uow.start();
-            
+
             result = supplier.get();
             uow.end();
-            
+            uowManager.unitOfWorkEventManager().sendEvent(new AfterEndEvent());
+
             return result;
         } catch (ProcessInstanceExecutionException e) {
           uow.end();
-          
+          uowManager.unitOfWorkEventManager().sendEvent(new AfterEndEvent());
+
           throw e;
         } catch (Exception e) {
             uow.abort();
+            uowManager.unitOfWorkEventManager().sendEvent(new AfterAbortEvent());
+
             if (e instanceof RuntimeException) {
                 throw (RuntimeException) e;
             } else {
                 throw new RuntimeException(e);
             }
         }
-        
+
     }
 }

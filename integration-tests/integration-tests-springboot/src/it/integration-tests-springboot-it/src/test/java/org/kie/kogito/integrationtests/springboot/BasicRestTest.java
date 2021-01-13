@@ -22,12 +22,19 @@ import java.util.Map;
 import java.util.UUID;
 
 import io.restassured.http.ContentType;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
+import org.kie.kogito.integrationtests.EventListener;
 import org.kie.kogito.testcontainers.springboot.InfinispanSpringBootTestResource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ContextConfiguration;
 
 import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.CoreMatchers.is;
@@ -40,6 +47,26 @@ import org.acme.travels.Traveller;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = KogitoSpringbootApplication.class)
 @ContextConfiguration(initializers = InfinispanSpringBootTestResource.Conditional.class)
 class BasicRestTest extends BaseRestTest {
+
+    private static final String NEGATIVE_TEST = "negative";
+
+    @Autowired
+    EventListener eventListener;
+
+    @BeforeEach
+    void resetEventListener() {
+        eventListener.reset();
+    }
+
+    @AfterEach
+    void verifyEventListener(TestInfo info) {
+        if (info.getTags().contains(NEGATIVE_TEST)) {
+            // Skip negative tests
+            return;
+        }
+        assertThat(eventListener.getBeforeStartEvent()).isNotNull();
+        assertThat(eventListener.getAfterEndEvent()).isNotNull();
+    }
 
     @Test
     void testGeneratedId() {
@@ -130,6 +157,7 @@ class BasicRestTest extends BaseRestTest {
     }
 
     @Test
+    @Tag(NEGATIVE_TEST)
     void testIdNotFound() {
         Map<String, String> params = new HashMap<>();
         params.put("var1", "Kermit");

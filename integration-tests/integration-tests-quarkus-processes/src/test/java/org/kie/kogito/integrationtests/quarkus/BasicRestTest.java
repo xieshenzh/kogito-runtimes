@@ -25,10 +25,18 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.acme.travels.Traveller;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
+import org.kie.kogito.integrationtests.EventListener;
 import org.kie.kogito.testcontainers.quarkus.InfinispanQuarkusTestResource;
 
+import javax.inject.Inject;
+
 import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.not;
@@ -41,6 +49,26 @@ class BasicRestTest {
 
     static {
         RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
+    }
+
+    private static final String NEGATIVE_TEST = "negative";
+
+    @Inject
+    EventListener eventListener;
+
+    @BeforeEach
+    void resetEventListener() {
+        eventListener.reset();
+    }
+
+    @AfterEach
+    void verifyEventListener(TestInfo info) {
+        if (info.getTags().contains(NEGATIVE_TEST)) {
+            // Skip negative tests
+            return;
+        }
+        assertThat(eventListener.getBeforeStartEvent()).isNotNull();
+        assertThat(eventListener.getAfterEndEvent()).isNotNull();
     }
 
     @Test
@@ -132,6 +160,7 @@ class BasicRestTest {
     }
 
     @Test
+    @Tag(NEGATIVE_TEST)
     void testIdNotFound() {
         Map<String, String> params = new HashMap<>();
         params.put("var1", "Kermit");
