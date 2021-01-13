@@ -16,24 +16,45 @@
 package org.kie.kogito.mongodb;
 
 import java.util.Collections;
+import java.util.Date;
 import java.util.Optional;
 
+import org.bson.conversions.Bson;
 import org.drools.core.io.impl.ClassPathResource;
+import org.jbpm.workflow.instance.WorkflowProcessInstance;
 import org.junit.jupiter.api.Test;
+import org.kie.kogito.mongodb.model.ProcessInstanceDocument;
+import org.kie.kogito.mongodb.transaction.MongoDBTransactionManager;
 import org.kie.kogito.persistence.KogitoProcessInstancesFactory;
+import org.kie.kogito.persistence.transaction.TransactionManager;
 import org.kie.kogito.process.ProcessInstance;
 import org.kie.kogito.process.ProcessInstanceReadMode;
 import org.kie.kogito.process.bpmn2.BpmnProcess;
 import org.kie.kogito.process.bpmn2.BpmnProcessInstance;
 import org.kie.kogito.process.bpmn2.BpmnVariables;
+import org.kie.kogito.process.impl.AbstractProcessInstance;
 
+import com.mongodb.client.ClientSession;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.kie.kogito.internal.process.runtime.KogitoProcessInstance.STATE_ACTIVE;
+import static org.kie.kogito.mongodb.utils.DocumentConstants.DOCUMENT_ID;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class MongoDBProcessInstancesTest extends TestHelper {
 
@@ -48,7 +69,7 @@ class MongoDBProcessInstancesTest extends TestHelper {
         processInstance.start();
         assertEquals(STATE_ACTIVE, processInstance.status());
 
-        MongoDBProcessInstances<?> mongodbInstance = new MongoDBProcessInstances<>(getMongoClient(), process, DB_NAME);
+        MongoDBProcessInstances<?> mongodbInstance = new MongoDBProcessInstances<>(getMongoClient(), process, DB_NAME, null);
 
         assertThat(mongodbInstance.size()).isOne();
         assertThat(mongodbInstance.size()).isEqualTo(process.instances().size());
@@ -71,6 +92,76 @@ class MongoDBProcessInstancesTest extends TestHelper {
         assertThat(mongodbInstance.values()).isEmpty();
     }
 
+    @Test
+    void testMongoDBPersistenceWithTransaction() {
+        TransactionManager<ClientSession> transactionExecutor = mock(TransactionManager.class);
+        ClientSession clientSession = mock(ClientSession.class);
+        when(transactionExecutor.getResource()).thenReturn(clientSession);
+
+        MongoClient mongoClient = mock(MongoClient.class);
+        MongoDatabase mongoDatabase = mock(MongoDatabase.class);
+        MongoCollection<ProcessInstanceDocument> mongoCollection = mock(MongoCollection.class);
+        when(mongoClient.getDatabase(anyString())).thenReturn(mongoDatabase);
+        when(mongoDatabase.withCodecRegistry(any())).thenReturn(mongoDatabase);
+        when(mongoDatabase.getCollection(anyString(), eq(ProcessInstanceDocument.class))).thenReturn(mongoCollection);
+        when(mongoCollection.withCodecRegistry(any())).thenReturn(mongoCollection);
+
+        MongoCursor<ProcessInstanceDocument> cursor = mock(MongoCursor.class);
+        when(cursor.hasNext()).thenReturn(false);
+        FindIterable<ProcessInstanceDocument> results = mock(FindIterable.class);
+        when(results.first()).thenReturn(null);
+        when(results.iterator()).thenReturn(cursor);
+        when(mongoCollection.find(eq(clientSession), any(Bson.class))).thenReturn(results);
+        when(mongoCollection.find(eq(clientSession))).thenReturn(results);
+        when(mongoCollection.find(any(Bson.class))).thenReturn(results);
+        when(mongoCollection.find()).thenReturn(results);
+
+        String id = "testId";
+
+        BpmnProcess process = BpmnProcess.from(new ClassPathResource("BPMN2-UserTask.bpmn2")).get(0);
+        process.setProcessInstancesFactory(new MongoDBProcessInstancesFactory(getMongoClient()));
+        process.configure();
+
+        MongoDBProcessInstances<BpmnVariables> mongodbInstance = new MongoDBProcessInstances<>(mongoClient, process, DB_NAME, transactionExecutor);
+
+        mongodbInstance.size();
+        verify(mongoCollection, times(1)).countDocuments(eq(clientSession));
+
+        mongodbInstance.findById(id, ProcessInstanceReadMode.READ_ONLY);
+        verify(mongoCollection, times(1)).find(eq(clientSession), eq(Filters.eq(DOCUMENT_ID, id)));
+
+        mongodbInstance.exists(id);
+        verify(mongoCollection, times(2)).find(eq(clientSession), eq(Filters.eq(DOCUMENT_ID, id)));
+
+        mongodbInstance.values(ProcessInstanceReadMode.READ_ONLY);
+        verify(mongoCollection, times(1)).find(eq(clientSession));
+
+        mongodbInstance.remove(id);
+        verify(mongoCollection, times(1)).deleteOne(eq(clientSession), eq(Filters.eq(DOCUMENT_ID, id)));
+
+        WorkflowProcessInstance updatePi = ((AbstractProcessInstance<?>) process.createInstance(BpmnVariables.create(Collections.singletonMap("test", "test")))).internalGetProcessInstance();
+        updatePi.setId(id);
+        updatePi.setStartDate(new Date());
+
+        AbstractProcessInstance mockUpdateProcessInstance = mock(AbstractProcessInstance.class);
+        when(mockUpdateProcessInstance.status()).thenReturn(ProcessInstance.STATE_ACTIVE);
+        when(mockUpdateProcessInstance.internalGetProcessInstance()).thenReturn(updatePi);
+
+        mongodbInstance.update(id, mockUpdateProcessInstance);
+        verify(mongoCollection, times(1)).replaceOne(eq(clientSession), eq(Filters.eq(DOCUMENT_ID, id)), any());
+
+        WorkflowProcessInstance createPi = ((AbstractProcessInstance<?>) process.createInstance(BpmnVariables.create(Collections.singletonMap("test", "test")))).internalGetProcessInstance();
+        createPi.setId(id);
+        createPi.setStartDate(new Date());
+
+        AbstractProcessInstance mockCreateProcessInstance = mock(AbstractProcessInstance.class);
+        when(mockCreateProcessInstance.status()).thenReturn(ProcessInstance.STATE_ACTIVE);
+        when(mockCreateProcessInstance.internalGetProcessInstance()).thenReturn(createPi);
+
+        mongodbInstance.create(id, mockCreateProcessInstance);
+        verify(mongoCollection, times(1)).insertOne(eq(clientSession), any());
+    }
+
     private class MongoDBProcessInstancesFactory extends KogitoProcessInstancesFactory {
 
         public MongoDBProcessInstancesFactory(MongoClient mongoClient) {
@@ -80,6 +171,11 @@ class MongoDBProcessInstancesTest extends TestHelper {
         @Override
         public String dbName() {
             return DB_NAME;
+        }
+
+        @Override
+        public MongoDBTransactionManager transactionManager() {
+            return null;
         }
     }
 
