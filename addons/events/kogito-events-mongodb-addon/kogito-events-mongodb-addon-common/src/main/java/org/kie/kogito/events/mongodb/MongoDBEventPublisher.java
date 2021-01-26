@@ -1,0 +1,117 @@
+/*
+ * Copyright 2021 Red Hat, Inc. and/or its affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.kie.kogito.events.mongodb;
+
+import com.mongodb.MongoClientSettings;
+import com.mongodb.client.ClientSession;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import org.bson.codecs.configuration.CodecRegistries;
+import org.bson.codecs.configuration.CodecRegistry;
+import org.kie.kogito.event.DataEvent;
+import org.kie.kogito.event.EventPublisher;
+import org.kie.kogito.events.mongodb.codec.EventMongoDBCodecProvider;
+import org.kie.kogito.persistence.transaction.TransactionManager;
+import org.kie.kogito.services.event.ProcessInstanceDataEvent;
+import org.kie.kogito.services.event.UserTaskInstanceDataEvent;
+import org.kie.kogito.services.event.VariableInstanceDataEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Collection;
+import java.util.function.BooleanSupplier;
+
+import static org.bson.codecs.configuration.CodecRegistries.fromProviders;
+
+public abstract class MongoDBEventPublisher implements EventPublisher {
+
+    private static final Logger logger = LoggerFactory.getLogger(MongoDBEventPublisher.class);
+
+    static final String ID = "_id";
+
+    private MongoCollection<ProcessInstanceDataEvent> processInstanceDataEventCollection;
+    private MongoCollection<UserTaskInstanceDataEvent> userTaskInstanceDataEventCollection;
+    private MongoCollection<VariableInstanceDataEvent> variableInstanceDataEventCollection;
+
+    protected abstract MongoClient mongoClient();
+
+    protected abstract TransactionManager<ClientSession> transactionManager();
+
+    protected abstract boolean processInstancesEvents();
+
+    protected abstract boolean userTasksEvents();
+
+    protected abstract boolean variablesEvents();
+
+    protected abstract String eventsDatabaseName();
+
+    protected abstract String processInstancesEventsCollection();
+
+    protected abstract String userTasksEventsCollection();
+
+    protected abstract String variablesEventsCollection();
+
+    protected void configure() {
+        CodecRegistry registry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), fromProviders(new EventMongoDBCodecProvider()));
+        MongoDatabase mongoDatabase = mongoClient().getDatabase(eventsDatabaseName()).withCodecRegistry(registry);
+        processInstanceDataEventCollection = mongoDatabase.getCollection(processInstancesEventsCollection(), ProcessInstanceDataEvent.class).withCodecRegistry(registry);
+        userTaskInstanceDataEventCollection = mongoDatabase.getCollection(userTasksEventsCollection(), UserTaskInstanceDataEvent.class).withCodecRegistry(registry);
+        variableInstanceDataEventCollection = mongoDatabase.getCollection(variablesEventsCollection(), VariableInstanceDataEvent.class).withCodecRegistry(registry);
+    }
+
+    @Override
+    public void publish(DataEvent<?> event) {
+        ClientSession clientSession = transactionManager() != null ? transactionManager().getResource() : null;
+
+        switch (event.getType()) {
+            case "ProcessInstanceEvent":
+                publishEvent(processInstanceDataEventCollection, (ProcessInstanceDataEvent) event, clientSession, this::processInstancesEvents);
+                break;
+            case "UserTaskInstanceEvent":
+                publishEvent(userTaskInstanceDataEventCollection, (UserTaskInstanceDataEvent) event, clientSession, this::userTasksEvents);
+                break;
+            case "VariableInstanceEvent":
+                publishEvent(variableInstanceDataEventCollection, (VariableInstanceDataEvent) event, clientSession, this::variablesEvents);
+                break;
+            default:
+                logger.warn("Unknown type of event '{}', ignoring", event.getType());
+        }
+    }
+
+    private <T extends DataEvent<?>> void publishEvent(MongoCollection<T> collection, T event, ClientSession clientSession, BooleanSupplier enabled) {
+        if (enabled.getAsBoolean()) {
+            if (clientSession != null) {
+                collection.insertOne(clientSession, event);
+                // delete the event immediately from the outbox collection
+                collection.deleteOne(clientSession, Filters.eq(ID, event.getId()));
+            } else {
+                collection.insertOne(event);
+                // delete the event from the outbox collection
+                collection.deleteOne(Filters.eq(ID, event.getId()));
+            }
+        }
+    }
+
+    @Override
+    public void publish(Collection<DataEvent<?>> events) {
+        for (DataEvent<?> event : events) {
+            publish(event);
+        }
+    }
+}

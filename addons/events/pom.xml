@@ -15,5 +15,6 @@
     <module>kogito-events-reactive-messaging-addon</module>
     <module>kogito-events-spring-boot-addon</module>
     <module>knative-eventing-addon</module>
+    <module>kogito-events-mongodb-addon</module>
   </modules>
 </project>
